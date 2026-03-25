@@ -7,41 +7,27 @@ from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
-# 1. Standard CORS Setup
+# 1. Sabse Powerful CORS Settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "OPTIONS", "HEAD"],
     allow_headers=["*"],
 )
-
-# 2. Manual CORS Header (Extra Protection)
-@app.middleware("http")
-async def add_process_time_header(request: Request, call_next):
-    if request.method == "OPTIONS":
-        return Response(content="OK", status_code=200, headers={
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "*",
-            "Access-Control-Allow-Headers": "*"
-        })
-    response = await call_next(request)
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    return response
 
 SOURCE_BASE = "https://omnistudy.netlify.app"
 cache = {"batches": []}
 
-async def sync_data():
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            resp = await client.get(f"{SOURCE_BASE}/api/AllBatches")
-            text = resp.text.replace("OmniStudy", "Rahul Maida")
-            data = json.loads(text)
-            cache["batches"] = data.get("data", [])
-            print(">>> SYNC: Success")
-        except:
-            print(">>> SYNC: Failed")
+# Function to fetch data with User-Agent (important to avoid blocks)
+async def fetch_source(url: str):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
+        resp = await client.get(url)
+        # Branding replace logic
+        return resp.text.replace("OmniStudy", "Rahul Maida")
 
 @app.on_event("startup")
 async def startup():
@@ -49,29 +35,41 @@ async def startup():
 
 async def periodic_sync():
     while True:
-        await sync_data()
+        try:
+            text = await fetch_source(f"{SOURCE_BASE}/api/AllBatches")
+            data = json.loads(text)
+            cache["batches"] = data.get("data", [])
+            print(">>> SYNC STATUS: DATA UPDATED")
+        except Exception as e:
+            print(f">>> SYNC ERROR: {e}")
         await asyncio.sleep(600)
 
-@app.get("/")
-def home(): return {"status": "ok", "owner": "Rahul Maida"}
+# Render Health Check Fix (HEAD aur GET dono allow hain)
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root():
+    return {"message": "Server is Running", "owner": "Rahul Maida"}
 
 @app.get("/api/batches")
 async def get_batches():
+    print(">>> LOG: Fetching all batches")
     return cache["batches"]
 
-# Endpoints modified to PATH style for better CORS handling
-@app.get("/api/details/{id}")
-async def get_details(id: str):
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        url = f"{SOURCE_BASE}/api/BatchDetails?BatchId={id}"
-        res = await client.get(url)
-        processed = res.text.replace("OmniStudy", "Rahul Maida")
-        return JSONResponse(content=json.loads(processed))
+@app.get("/api/details/{bid}")
+async def get_details(bid: str):
+    print(f">>> LOG: Fetching details for {bid}")
+    try:
+        text = await fetch_source(f"{SOURCE_BASE}/api/BatchDetails?BatchId={bid}")
+        return JSONResponse(content=json.loads(text))
+    except Exception as e:
+        print(f">>> LOG ERROR: {e}")
+        return JSONResponse(content={"status":"error", "msg": str(e)}, status_code=200)
 
 @app.get("/api/content/{bid}/{sid}")
 async def get_content(bid: str, sid: str):
-    async with httpx.AsyncClient(timeout=20.0) as client:
-        url = f"{SOURCE_BASE}/api/BatchContent?BatchId={bid}&SubjectId={sid}"
-        res = await client.get(url)
-        processed = res.text.replace("OmniStudy", "Rahul Maida")
-        return JSONResponse(content=json.loads(processed))
+    print(f">>> LOG: Fetching content for {bid} | {sid}")
+    try:
+        text = await fetch_source(f"{SOURCE_BASE}/api/BatchContent?BatchId={bid}&SubjectId={sid}")
+        return JSONResponse(content=json.loads(text))
+    except Exception as e:
+        print(f">>> LOG ERROR: {e}")
+        return JSONResponse(content={"status":"error", "msg": str(e)}, status_code=200)
