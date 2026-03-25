@@ -1,13 +1,11 @@
 import json
-from fastapi import FastAPI, BackgroundTasks
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import asyncio
-from typing import Dict, Any
 
-app = FastAPI(title="Rahul Maida Study Portal API")
+app = FastAPI()
 
-# Frontend ko connect karne ke liye settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,22 +14,16 @@ app.add_middleware(
 )
 
 SOURCE_BASE = "https://omnistudy.netlify.app"
-cache = {"batches": [], "last_updated": None}
+cache = {"batches": []}
 
 async def sync_data():
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            # Omnistudy se data lana
             resp = await client.get(f"{SOURCE_BASE}/api/AllBatches")
-            
-            # Branding change karna (OmniStudy -> Rahul Maida)
             text = resp.text.replace("OmniStudy", "Rahul Maida")
-            
-            # JSON mein convert karna (Yahan pehle galti thi, ab thik hai)
             data = json.loads(text)
-            
             cache["batches"] = data.get("data", [])
-            print("Sync successful: Latest batches mirrored for Rahul Maida.")
+            print("Batches Synced!")
         except Exception as e:
             print(f"Sync error: {e}")
 
@@ -42,24 +34,27 @@ async def startup():
 async def periodic_sync():
     while True:
         await sync_data()
-        await asyncio.sleep(300) # Har 5 minute mein update hoga
-
-@app.get("/")
-async def root():
-    return {"message": "Rahul Maida Backend is Running", "status": "online"}
+        await asyncio.sleep(600)
 
 @app.get("/api/batches")
 async def get_batches():
     return cache["batches"]
 
-@app.get("/api/batch-info")
-async def get_batch_info(batchId: str, type: str = "subject"):
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        url = f"{SOURCE_BASE}/api/BatchInfo?BatchId={batchId}&Type={type}"
+# Naya Endpoint: Subjects lane ke liye
+@app.get("/api/batch-details")
+async def get_details(batchId: str):
+    async with httpx.AsyncClient() as client:
+        url = f"{SOURCE_BASE}/api/BatchDetails?batchId={batchId}"
         res = await client.get(url)
-        text = res.text.replace("OmniStudy", "Rahul Maida")
-        return json.loads(text)
+        return json.loads(res.text.replace("OmniStudy", "Rahul Maida"))
 
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+# Naya Endpoint: Videos/PDF lane ke liye
+@app.get("/api/batch-content")
+async def get_content(batchId: str, subjectId: str):
+    async with httpx.AsyncClient() as client:
+        url = f"{SOURCE_BASE}/api/BatchContent?batchId={batchId}&subjectId={subjectId}"
+        res = await client.get(url)
+        return json.loads(res.text.replace("OmniStudy", "Rahul Maida"))
+
+@app.get("/")
+def home(): return {"status": "Rahul Maida API is live"}
