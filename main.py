@@ -1,8 +1,8 @@
 import json
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 import httpx
 import asyncio
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
@@ -23,7 +23,7 @@ async def sync_data():
             text = resp.text.replace("OmniStudy", "Rahul Maida")
             data = json.loads(text)
             cache["batches"] = data.get("data", [])
-            print("Batches Synced!")
+            print("Successfully synced with Rahul Maida Server")
         except Exception as e:
             print(f"Sync error: {e}")
 
@@ -40,21 +40,19 @@ async def periodic_sync():
 async def get_batches():
     return cache["batches"]
 
-# Naya Endpoint: Subjects lane ke liye
 @app.get("/api/batch-details")
 async def get_details(batchId: str):
-    async with httpx.AsyncClient() as client:
-        url = f"{SOURCE_BASE}/api/BatchDetails?batchId={batchId}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        url = f"{SOURCE_BASE}/api/BatchDetails?BatchId={batchId}"
         res = await client.get(url)
         return json.loads(res.text.replace("OmniStudy", "Rahul Maida"))
 
-# Naya Endpoint: Videos/PDF lane ke liye
 @app.get("/api/batch-content")
 async def get_content(batchId: str, subjectId: str):
-    async with httpx.AsyncClient() as client:
-        url = f"{SOURCE_BASE}/api/BatchContent?batchId={batchId}&subjectId={subjectId}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        url = f"{SOURCE_BASE}/api/BatchContent?BatchId={batchId}&SubjectId={subjectId}"
         res = await client.get(url)
         return json.loads(res.text.replace("OmniStudy", "Rahul Maida"))
 
 @app.get("/")
-def home(): return {"status": "Rahul Maida API is live"}
+def home(): return {"message": "Rahul Maida API is Running"}
