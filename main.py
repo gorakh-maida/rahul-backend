@@ -1,4 +1,4 @@
-
+import json
 from fastapi import FastAPI, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 import httpx
@@ -7,6 +7,7 @@ from typing import Dict, Any
 
 app = FastAPI(title="Rahul Maida Study Portal API")
 
+# Frontend ko connect karne ke liye settings
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -20,13 +21,17 @@ cache = {"batches": [], "last_updated": None}
 async def sync_data():
     async with httpx.AsyncClient(timeout=30.0) as client:
         try:
-            # Mirror batches
+            # Omnistudy se data lana
             resp = await client.get(f"{SOURCE_BASE}/api/AllBatches")
-            # Replace Branding
+            
+            # Branding change karna (OmniStudy -> Rahul Maida)
             text = resp.text.replace("OmniStudy", "Rahul Maida")
-            data = httpx.codes.json_decode(text)
+            
+            # JSON mein convert karna (Yahan pehle galti thi, ab thik hai)
+            data = json.loads(text)
+            
             cache["batches"] = data.get("data", [])
-            print("Sync successful.")
+            print("Sync successful: Latest batches mirrored for Rahul Maida.")
         except Exception as e:
             print(f"Sync error: {e}")
 
@@ -37,7 +42,11 @@ async def startup():
 async def periodic_sync():
     while True:
         await sync_data()
-        await asyncio.sleep(300)
+        await asyncio.sleep(300) # Har 5 minute mein update hoga
+
+@app.get("/")
+async def root():
+    return {"message": "Rahul Maida Backend is Running", "status": "online"}
 
 @app.get("/api/batches")
 async def get_batches():
@@ -49,7 +58,7 @@ async def get_batch_info(batchId: str, type: str = "subject"):
         url = f"{SOURCE_BASE}/api/BatchInfo?BatchId={batchId}&Type={type}"
         res = await client.get(url)
         text = res.text.replace("OmniStudy", "Rahul Maida")
-        return httpx.codes.json_decode(text)
+        return json.loads(text)
 
 if __name__ == "__main__":
     import uvicorn
