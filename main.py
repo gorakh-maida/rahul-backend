@@ -1,81 +1,74 @@
-import json, httpx, asyncio
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+import requests
+import re
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-SOURCE_BASE = "https://omnistudy.netlify.app"
-cache = {"batches": []}
+TARGET_BASE = "https://rolexcoderz.in"
 
-async def fetch_source(url: str):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
-        try:
-            resp = await client.get(url)
-            if resp.status_code == 200:
-                print(f">>> FETCH SUCCESS: {url}")
-                return resp.text.replace("OmniStudy", "Rahul Maida")
-            return None
-        except Exception as e:
-            print(f">>> FETCH ERROR: {e}")
-            return None
-
-@app.on_event("startup")
-async def startup():
-    asyncio.create_task(periodic_sync())
-
-async def periodic_sync():
-    while True:
-        text = await fetch_source(f"{SOURCE_BASE}/api/AllBatches")
-        if text:
-            data = json.loads(text)
-            cache["batches"] = data.get("data", [])
-            print(f">>> SYNC SUCCESS: {len(cache['batches'])} Batches")
-        await asyncio.sleep(600)
-
-@app.get("/api/batches")
-async def get_batches(): return cache["batches"]
-
-@app.get("/api/details/{bid}")
-async def get_details(bid: str):
-    # Try multiple URL variants to be safe
-    text = await fetch_source(f"{SOURCE_BASE}/api/BatchDetails?BatchId={bid}")
-    if not text:
-        return JSONResponse({"status": "error", "data": {"subjects": []}})
+@app.get("/{path:path}")
+async def master_proxy(path: str, request: Request):
+    if not path or path == "/":
+        path = "MissionJeet/"
     
-    try:
-        raw_data = json.loads(text)
-        # Check if it's already in the structure we need
-        if "data" in raw_data:
-            return JSONResponse(raw_data)
-        else:
-            # If it's a raw list or something else, wrap it
-            return JSONResponse({"status": "success", "data": {"subjects": raw_data}})
-    except:
-        return JSONResponse({"status": "error", "data": {"subjects": []}})
+    query_params = str(request.query_params)
+    target_url = f"{TARGET_BASE}/{path}"
+    if query_params:
+        target_url += f"?{query_params}"
 
-@app.get("/api/content/{bid}/{sid}")
-async def get_content(bid: str, sid: str):
-    text = await fetch_source(f"{SOURCE_BASE}/api/BatchContent?BatchId={bid}&SubjectId={sid}")
-    if not text: return JSONResponse({"status": "error", "data": []})
-    
     try:
-        raw_data = json.loads(text)
-        if "data" in raw_data:
-            return JSONResponse(raw_data)
-        else:
-            return JSONResponse({"status": "success", "data": raw_data})
-    except:
-        return JSONResponse({"status": "error", "data": []})
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+            "Referer": TARGET_BASE
+        }
+        
+        resp = requests.get(target_url, headers=headers, timeout=30)
+        content_type = resp.headers.get("Content-Type", "")
 
-@app.api_route("/", methods=["GET", "HEAD"])
-async def root(): return {"status": "online"}
+        # Sirf HTML content ko filter karna hai
+        if "text/html" not in content_type:
+            return Response(content=resp.content, media_type=content_type)
+
+        html = resp.text
+
+        # 1. FIX ASSETS: Script, CSS, Images ko absolute banana taaki "Not defined" error na aaye
+        # Ye saare relative links ko https://rolexcoderz.in/... se replace karega
+        html = re.sub(r'(src|href)=["\'](?!\/|http|https|#|javascript|tel|mailto)([^"\']+)["\']', 
+                      rf'\1="{TARGET_BASE}/MissionJeet/\2"', html)
+        html = re.sub(r'(src|href)=["\']\/([^"\']+)["\']', 
+                      rf'\1="{TARGET_BASE}/\2"', html)
+
+        # 2. BRANDING: Name Change
+        html = html.replace("RolexCoderZ", "Rahul Maida Study")
+        html = html.replace("Rolex", "Rahul Maida")
+        html = html.replace("Rolex Coderz", "Rahul Maida Study")
+        html = html.replace("RC", "RM")
+
+        # 3. INTERCEPT CLICKS: Course folders ke links ko hamare query path mein badalna
+        # Taaki website hamare hi domain par rahe
+        def link_intercept(match):
+            original = match.group(2)
+            if "content/index.php" in original:
+                return f'href="/?path=MissionJeet/{original}"'
+            return match.group(0)
+
+        html = re.sub(r'href=(["\'])([^"\']+)\1', link_intercept, html)
+
+        return HTMLResponse(content=html)
+
+    except Exception as e:
+        return HTMLResponse(content=f"<h3>Syncing... Please Refresh. Error: {str(e)}</h3>")
+
+@app.get("/")
+def check():
+    return {"status": "Rahul Maida API Live"}
