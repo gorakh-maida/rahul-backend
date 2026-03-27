@@ -1,62 +1,81 @@
+import json, httpx, asyncio
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
-import requests
-import re
+from fastapi.responses import JSONResponse
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-TARGET_BASE = "https://rolexcoderz.in"
+SOURCE_BASE = "https://omnistudy.netlify.app"
+cache = {"batches": []}
 
-@app.get("/{path:path}")
-async def proxy_engine(path: str, request: Request):
-    # Default landing page
-    current_path = path if path else "MissionJeet/"
+async def fetch_source(url: str):
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                print(f">>> FETCH SUCCESS: {url}")
+                return resp.text.replace("OmniStudy", "Rahul Maida")
+            return None
+        except Exception as e:
+            print(f">>> FETCH ERROR: {e}")
+            return None
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(periodic_sync())
+
+async def periodic_sync():
+    while True:
+        text = await fetch_source(f"{SOURCE_BASE}/api/AllBatches")
+        if text:
+            data = json.loads(text)
+            cache["batches"] = data.get("data", [])
+            print(f">>> SYNC SUCCESS: {len(cache['batches'])} Batches")
+        await asyncio.sleep(600)
+
+@app.get("/api/batches")
+async def get_batches(): return cache["batches"]
+
+@app.get("/api/details/{bid}")
+async def get_details(bid: str):
+    # Try multiple URL variants to be safe
+    text = await fetch_source(f"{SOURCE_BASE}/api/BatchDetails?BatchId={bid}")
+    if not text:
+        return JSONResponse({"status": "error", "data": {"subjects": []}})
     
-    # Query parameters parse karein
-    params = str(request.query_params)
-    target_url = f"{TARGET_BASE}/{current_path}"
-    if params:
-        target_url += f"?{params}"
-
     try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        resp = requests.get(target_url, headers=headers, timeout=20)
-        
-        # Static files (Images/JS/CSS) ko bina chhede bhej do
-        if "text/html" not in resp.headers.get("Content-Type", ""):
-            return Response(content=resp.content, media_type=resp.headers.get("Content-Type"))
+        raw_data = json.loads(text)
+        # Check if it's already in the structure we need
+        if "data" in raw_data:
+            return JSONResponse(raw_data)
+        else:
+            # If it's a raw list or something else, wrap it
+            return JSONResponse({"status": "success", "data": {"subjects": raw_data}})
+    except:
+        return JSONResponse({"status": "error", "data": {"subjects": []}})
 
-        html = resp.text
+@app.get("/api/content/{bid}/{sid}")
+async def get_content(bid: str, sid: str):
+    text = await fetch_source(f"{SOURCE_BASE}/api/BatchContent?BatchId={bid}&SubjectId={sid}")
+    if not text: return JSONResponse({"status": "error", "data": []})
+    
+    try:
+        raw_data = json.loads(text)
+        if "data" in raw_data:
+            return JSONResponse(raw_data)
+        else:
+            return JSONResponse({"status": "success", "data": raw_data})
+    except:
+        return JSONResponse({"status": "error", "data": []})
 
-        # 1. FIX LINKS: Redirection rokne ke liye
-        # Isse har folder click karne par URL aapki netlify site hi rahegi
-        def fix_href(match):
-            link = match.group(1)
-            if link.startswith(("http", "tel", "mailto", "#", "javascript")):
-                return match.group(0)
-            return f'href="/?path=MissionJeet/{link.lstrip("/")}"'
-
-        html = re.sub(r'href="([^"]+)"', fix_href, html)
-
-        # 2. BRANDING: Name replacement
-        html = html.replace("RolexCoderZ", "Rahul Maida Study")
-        html = html.replace("RolexCoderz", "Rahul Maida Study")
-        html = html.replace("Rolex", "Rahul Maida")
-        
-        # 3. ASSETS FIX: <base> tag inject karna taaki JS/CSS load ho sake
-        base_tag = f'<base href="{TARGET_BASE}/MissionJeet/">'
-        html = html.replace("<head>", f"<head>{base_tag}")
-
-        return HTMLResponse(content=html)
-
-    except Exception as e:
-        return HTMLResponse(content=f"<h3>Error Connecting to Server: {str(e)}</h3>")
+@app.api_route("/", methods=["GET", "HEAD"])
+async def root(): return {"status": "online"}
