@@ -1,91 +1,63 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rahul Maida Study</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/lucide@latest"></script>
-    <style>body { background: #0f172a; color: white; }</style>
-</head>
-<body class="p-5">
-    <div class="max-w-5xl mx-auto">
-        <header class="flex justify-between items-center mb-8">
-            <h1 onclick="location.reload()" class="text-2xl font-black text-yellow-400 cursor-pointer">RAHUL MAIDA</h1>
-            <div id="nav"></div>
-        </header>
+import json, httpx, asyncio
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-        <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            <div class="col-span-full text-center py-20 animate-pulse text-slate-500">Connecting to Rahul's API...</div>
-        </div>
-    </div>
+app = FastAPI()
 
-    <script>
-        const API = "https://rahul-backend-7ag5.onrender.com";
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-        async function start() {
-            const res = await fetch(`${API}/api/batches`);
-            const data = await res.json();
-            const grid = document.getElementById('grid');
-            
-            grid.innerHTML = data.map(b => `
-                <div onclick="openBatch('${b.batchId}')" class="bg-slate-800 border border-white/5 p-4 rounded-2xl cursor-pointer hover:border-yellow-400">
-                    <img src="${b.batchImage}" class="w-full h-40 object-cover rounded-xl mb-4">
-                    <h3 class="font-bold text-sm">${b.batchName}</h3>
-                </div>
-            `).join('');
-        }
+SOURCE_BASE = "https://omnistudy.netlify.app"
+cache = {"batches": []}
 
-        async function openBatch(bid) {
-            const grid = document.getElementById('grid');
-            grid.innerHTML = "<div class='col-span-full py-20 text-center text-yellow-500 font-bold'>FETCHING SUBJECTS...</div>";
-            
-            try {
-                const res = await fetch(`${API}/api/details/${bid}`);
-                const resData = await res.json();
-                
-                // BACKUP DATA CHECK: Agar data.subjects khali hai toh data pure array ko check karo
-                let subjects = (resData.data && resData.data.subjects) ? resData.data.subjects : (resData.data || []);
+async def fetch_from_source(url: str):
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Referer": f"{SOURCE_BASE}/",
+        "Origin": SOURCE_BASE
+    }
+    async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
+        try:
+            r = await client.get(url)
+            if r.status_code == 200:
+                # Replace 'OmniStudy' with your name in the text
+                return r.text.replace("OmniStudy", "Rahul Maida")
+            return None
+        except:
+            return None
 
-                document.getElementById('nav').innerHTML = `<button onclick="location.reload()" class="bg-white text-black px-4 py-1 rounded-lg font-bold">BACK</button>`;
+@app.on_event("startup")
+async def startup():
+    # Initial Sync
+    text = await fetch_from_source(f"{SOURCE_BASE}/api/AllBatches")
+    if text:
+        try:
+            data = json.loads(text)
+            cache["batches"] = data.get("data", [])
+        except: pass
 
-                if (subjects.length === 0) {
-                    grid.innerHTML = "<div class='col-span-full text-center py-20'>No Subjects Found. Try another batch.</div>";
-                    return;
-                }
+@app.get("/")
+def home(): return {"status": "running", "batches": len(cache["batches"])}
 
-                grid.innerHTML = subjects.map(s => `
-                    <div onclick="openContent('${bid}', '${s.subjectId}')" class="bg-slate-800 p-6 rounded-2xl border border-white/5 flex items-center gap-4 cursor-pointer hover:bg-slate-700">
-                        <div class="h-10 w-10 bg-yellow-500/20 rounded flex items-center justify-center text-yellow-500">
-                            <i data-lucide="folder"></i>
-                        </div>
-                        <span class="font-bold text-sm">${s.subjectName}</span>
-                    </div>
-                `).join('');
-                lucide.createIcons();
-            } catch(e) { grid.innerHTML = "Error loading details."; }
-        }
+@app.get("/api/batches")
+async def get_batches(): return cache["batches"]
 
-        async function openContent(bid, sid) {
-            const grid = document.getElementById('grid');
-            grid.innerHTML = "<div class='col-span-full py-20 text-center'>LOADING...</div>";
+@app.get("/api/details/{bid}")
+async def get_details(bid: str):
+    # Try the most logical endpoint
+    url = f"{SOURCE_BASE}/api/BatchDetails?BatchId={bid}"
+    text = await fetch_from_source(url)
+    if not text: return {"data": {"subjects": []}}
+    return JSONResponse(content=json.loads(text))
 
-            try {
-                const res = await fetch(`${API}/api/content/${bid}/${sid}`);
-                const data = await res.json();
-                const content = data.data || [];
-
-                grid.innerHTML = content.map(item => `
-                    <div class="bg-slate-800 border border-white/5 p-5 rounded-2xl flex flex-col justify-between">
-                        <h4 class="text-sm font-bold mb-4">${item.title}</h4>
-                        <a href="${item.url}" target="_blank" class="block w-full text-center bg-yellow-400 text-black py-2 rounded-xl font-bold text-[10px]">OPEN NOW</a>
-                    </div>
-                `).join('');
-                lucide.createIcons();
-            } catch(e) { grid.innerHTML = "No content here."; }
-        }
-
-        window.onload = start;
-    </script>
-</body>
-</html>
+@app.get("/api/content/{bid}/{sid}")
+async def get_content(bid: str, sid: str):
+    url = f"{SOURCE_BASE}/api/BatchContent?BatchId={bid}&SubjectId={sid}"
+    text = await fetch_from_source(url)
+    if not text: return {"data": []}
+    return JSONResponse(content=json.loads(text))
