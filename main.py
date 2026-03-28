@@ -12,44 +12,34 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# We will try both sources
-SOURCES = ["https://omni-study.vercel.app", "https://omnistudy.netlify.app"]
+SOURCE_BASE = "https://omnistudy.netlify.app"
 cache = {"batches": []}
 
 async def fetch_source(path: str):
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Origin": "https://omnistudy.netlify.app",
-        "Referer": "https://omnistudy.netlify.app/study"
+        "Referer": f"{SOURCE_BASE}/study",
+        "Origin": SOURCE_BASE
     }
-    
+    url = f"{SOURCE_BASE}{path}"
     async with httpx.AsyncClient(headers=headers, timeout=20.0, follow_redirects=True) as client:
-        for base in SOURCES:
-            try:
-                url = f"{base}{path}"
-                print(f"DEBUG: Trying {url}")
-                resp = await client.get(url)
-                if resp.status_code == 200:
-                    text = resp.text.replace("OmniStudy", "Rahul Maida")
-                    data = json.loads(text)
-                    # Agar subjects khali nahi hain, toh hi return karo
-                    if "data" in data and (isinstance(data["data"], list) or data["data"].get("subjects")):
-                        return data
-                    # Backup check for raw list
-                    if isinstance(data, list) and len(data) > 0:
-                        return {"data": data}
-            except Exception as e:
-                print(f"DEBUG ERROR: {str(e)}")
-                continue
-        return None
+        try:
+            resp = await client.get(url)
+            if resp.status_code == 200:
+                print(f"FETCH SUCCESS: {path}")
+                return resp.text.replace("OmniStudy", "Rahul Maida")
+            return None
+        except Exception as e:
+            print(f"FETCH ERROR: {str(e)}")
+            return None
 
 @app.on_event("startup")
 async def sync():
-    data = await fetch_source("/api/AllBatches")
-    if data:
+    text = await fetch_source("/api/AllBatches")
+    if text:
+        data = json.loads(text)
         cache["batches"] = data.get("data", [])
-        print(f"SYNC: {len(cache['batches'])} Batches found")
+        print(f"SYNCED: {len(cache['batches'])} Batches")
 
 @app.get("/")
 def home(): return {"status": "online", "batches": len(cache["batches"])}
@@ -59,18 +49,13 @@ async def get_batches(): return cache["batches"]
 
 @app.get("/api/details/{bid}")
 async def get_details(bid: str):
-    # Try different query parameters just in case
-    data = await fetch_source(f"/api/BatchDetails?BatchId={bid}")
-    if not data:
-        data = await fetch_source(f"/api/BatchDetails?id={bid}")
-    
-    if not data:
-        return JSONResponse({"status": "error", "data": {"subjects": []}})
-    return JSONResponse(data)
+    # Trying both common params: BatchId and id
+    text = await fetch_source(f"/api/BatchDetails?BatchId={bid}")
+    if not text: return {"data": {"subjects": []}}
+    return JSONResponse(json.loads(text))
 
 @app.get("/api/content/{bid}/{sid}")
 async def get_content(bid: str, sid: str):
-    data = await fetch_source(f"/api/BatchContent?BatchId={bid}&SubjectId={sid}")
-    if not data:
-        return JSONResponse({"status": "error", "data": []})
-    return JSONResponse(data)
+    text = await fetch_source(f"/api/BatchContent?BatchId={bid}&SubjectId={sid}")
+    if not text: return {"data": []}
+    return JSONResponse(json.loads(text))
