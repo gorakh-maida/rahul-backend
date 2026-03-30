@@ -4,50 +4,59 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 app = FastAPI()
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
-# --- YOUR MASTER CONFIG ---
-# Maine aapka paste kiya hua token yahan set kar diya hai
+# --- CORS FIX: Purely global allow ---
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 TOKEN = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2OWM3N2QzNWFiMDA2MDNiY2JlYWMwZmQiLCJuYW1lIjoiUmFodWwgIiwidGVsZWdyYW1JZCI6bnVsbCwiUGhvdG9VcmwiOiJodHRwczovL2Nkbi1pY29ucy1wbmcuZmxhdGljb24uY29tLzUxMi8zNjA3LzM2MDc0NDQucG5nIiwiaWF0IjoxNzc0Nzc4OTIwLCJleHAiOjE3NzYwNzQ5MjB9.KC4Xg6bszdR2YDaVEL0KjHAQ-pVoYKP6ct3o9F7p-BE"
-BASE = "https://omnistudy.netlify.app"
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-    "Authorization": f"Bearer {TOKEN}", # Token Bypass
-    "Cookie": f"accessToken={TOKEN}",    # Cookie Bypass
-    "Referer": f"{BASE}/study",
-    "Origin": BASE
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Authorization": f"Bearer {TOKEN}",
+    "Cookie": f"accessToken={TOKEN}",
+    "Referer": "https://omnistudy.netlify.app/",
+    "Origin": "https://omnistudy.netlify.app"
 }
 
 @app.get("/api/batches")
 async def get_batches():
-    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
-        r = await client.get(f"{BASE}/api/AllBatches")
-        # Live Sync: Directly returning fresh data from source
-        return r.json().get("data", [])
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+            r = await client.get("https://omnistudy.netlify.app/api/AllBatches")
+            # Agar JSON nahi mila toh error handle karega
+            data = r.json()
+            return JSONResponse(content=data.get("data", []), headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e), "msg": "API is down"}, status_code=500)
 
 @app.get("/api/details/{bid}")
 async def get_details(bid: str):
-    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
-        # Tried both cases to avoid "Silly Mistakes"
-        url = f"{BASE}/api/BatchInfo?BatchId={bid}&Type=details"
-        r = await client.get(url)
-        data = r.json()
-        
-        # Data Extraction logic
-        subjects = data.get("data", {}).get("subjects", [])
-        if not subjects and isinstance(data.get("data"), list):
-            subjects = data.get("data")
-            
-        return {"data": {"subjects": subjects}}
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+            url = f"https://omnistudy.netlify.app/api/BatchInfo?BatchId={bid}&Type=details"
+            r = await client.get(url)
+            data = r.json()
+            return JSONResponse(content=data, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/api/content/{bid}/{sid}")
 async def get_content(bid: str, sid: str):
-    async with httpx.AsyncClient(headers=HEADERS, follow_redirects=True) as client:
-        # Using the new Live Content API
-        url = f"{BASE}/api/BatchContents?BatchId={bid}&SubjectId={sid}"
-        r = await client.get(url)
-        return r.json()
+    try:
+        async with httpx.AsyncClient(headers=HEADERS, timeout=20.0, follow_redirects=True) as client:
+            url = f"https://omnistudy.netlify.app/api/BatchContents?BatchId={bid}&SubjectId={sid}"
+            r = await client.get(url)
+            data = r.json()
+            return JSONResponse(content=data, headers={"Access-Control-Allow-Origin": "*"})
+    except Exception as e:
+        return JSONResponse(content={"error": str(e)}, status_code=500)
 
 @app.get("/")
-def home(): return {"status": "Active", "user": "Rahul Maida", "mode": "Bypass-Enabled"}
+def health():
+    return {"status": "Rahul Backend is Online", "proxy": "OmniStudy Bypassed"}
